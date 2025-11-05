@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Descarte Eletrônico — Ponto mais próximo</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="icon" href="https://leafletjs.com/docs/images/logo.png">
+
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin:0; color:#222; }
+    header { background: linear-gradient(90deg,#2b8a3e,#6ac67a); color:white; padding:18px; }
+    .container { padding:18px; max-width:1100px; margin:0 auto; }
+    #map { height:400px; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); }
+    .controls { display:flex; gap:12px; margin:12px 0; flex-wrap:wrap; }
+    button { background:#2b8a3e; color:white; border:0; padding:10px 14px; border-radius:8px; cursor:pointer; }
+    button.secondary { background:#f0f0f0; color:#222; }
+    input { padding:8px; border-radius:6px; border:1px solid #ddd; }
+    .info { margin-top:12px; padding:12px; background:#f7fff7; border-radius:8px; border:1px solid #e6f6e8; }
+    .list { margin-top:12px; display:grid; gap:10px; }
+    .item { padding:10px; border-radius:8px; background:white; box-shadow:0 1px 4px rgba(0,0,0,0.04); display:flex; justify-content:space-between; align-items:center; }
+    .distance { color:#2b8a3e; font-weight:700; margin-left:8px; }
+    .small { font-size:0.9rem; color:#666; }
+    .link { color:#2b8a3e; cursor:pointer; text-decoration:underline; }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="container">
+      <h1>Descarte Eletrônico — Encontre o ponto mais próximo</h1>
+      <p></p>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="controls">
+      <button id="btn-locate"> minha localização</button>
+      <button class="secondary" id="btn-refresh">🔄 Atualizar lista</button>
+      <div>
+        <input id="manual-coords" placeholder="ex: -23.5475,-46.63611">
+        <button id="btn-manual">Usar coords</button>
+      </div>
+    </div>
+
+    <div id="map"></div>
+
+    <div class="info" id="resultInfo">
+      Clique em "Usar minha localização" para encontrar o ponto mais próximo.
+    </div>
+
+    <h3>Pontos de descarte</h3>
+    <div class="list" id="list"></div>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+
+    const dropOffs = [
+      { name: "Ecoponto Centro", lat: -23.55052, lng: -46.633308, address: "Av. Centro, 100" },
+      { name: "Coleta ReciclaTech", lat: -23.5475, lng: -46.63611, address: "Rua das Torres, 45" },
+      { name: "Ponto Sustenta Sul", lat: -23.56, lng: -46.64, address: "Av. Sul, s/n" },
+    ];
+
+    const map = L.map('map').setView([-23.55, -46.63], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    const markersGroup = L.layerGroup().addTo(map);
+
+    // Ícone customizado para "você está aqui"
+    const userIcon = L.divIcon({
+      className: 'user-icon',
+      html: `<div style="width:18px;height:18px;border-radius:50%;background:#2b8a3e;border:3px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3)"></div>`,
+      iconSize: [24,24],
+      iconAnchor: [12,12]
+    });
+
+    let userMarker = null; // marcador único para a localização do usuário
+
+    function drawMarkers() {
+      markersGroup.clearLayers();
+      dropOffs.forEach(p => {
+        L.marker([p.lat, p.lng])
+          .bindPopup(`<b>${p.name}</b><br>${p.address}`)
+          .addTo(markersGroup);
+      });
+    }
+    drawMarkers();
+
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371e3;
+      const toRad = deg => deg * Math.PI/180;
+      const dLat = toRad(lat2-lat1);
+      const dLon = toRad(lon2-lon1);
+      const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function updateList(sorted, userPos) {
+      const listEl = document.getElementById('list');
+      // Primeiro item: usuário
+      let html = `<div class="item">
+        <div>
+          <b>Você está aqui</b><br><span class="small">${userPos.lat.toFixed(5)}, ${userPos.lng.toFixed(5)}</span>
+        </div>
+        <div class="distance">0.00 km</div>
+      </div>`;
+      // Em seguida, os pontos ordenados (ignorando se for exatamente a mesma posição)
+      sorted.forEach(p=>{
+        html += `<div class="item">
+          <div>
+            <b class="link" data-lat="${p.lat}" data-lng="${p.lng}">${p.name}</b><br><span class="small">${p.address}</span>
+          </div>
+          <div class="distance">${(p.dist/1000).toFixed(2)} km</div>
+        </div>`;
+      });
+      listEl.innerHTML = html;
+
+      // Adiciona click handler para centralizar quando o usuário clica no nome
+      listEl.querySelectorAll('.link').forEach(el=>{
+        el.addEventListener('click', (e)=>{
+          const lat = Number(e.target.dataset.lat);
+          const lng = Number(e.target.dataset.lng);
+          map.setView([lat,lng], 16);
+        });
+      });
+    }
+
+    function showNearest(lat, lng) {
+      // calcula distâncias
+      const sorted = dropOffs.map(p => ({...p, dist: haversine(lat,lng,p.lat,p.lng)}))
+                             .sort((a,b)=>a.dist-b.dist);
+
+      // atualiza/coloca marcador do usuário (mantém apenas 1)
+      if (userMarker) {
+        userMarker.setLatLng([lat,lng]);
+      } else {
+        userMarker = L.marker([lat,lng], {icon: userIcon, zIndexOffset: 1000})
+                      .bindPopup("Você está aqui")
+                      .addTo(map);
+      }
+      userMarker.openPopup();
+
+      // redesenha os pontos de coleta (mantendo userMarker separado)
+      drawMarkers();
+      sorted.forEach(p=>{
+        // para melhorar UX, já existe marcador criado por drawMarkers; manter popup com distância
+        // vamos adicionar um círculo leve ao redor do ponto mais próximo para destaque
+      });
+
+      // ajustar bounds para mostrar usuário e ponto mais próximo
+      const bounds = L.latLngBounds([[lat,lng],[sorted[0].lat,sorted[0].lng]]);
+      map.fitBounds(bounds.pad(0.2));
+
+      document.getElementById('resultInfo').innerHTML =
+        `<b>Mais próximo:</b> ${sorted[0].name} — ${(sorted[0].dist/1000).toFixed(2)} km`;
+
+      updateList(sorted, {lat, lng});
+    }
+
+    document.getElementById('btn-locate').addEventListener('click',()=>{
+      if (!navigator.geolocation) return alert("Seu navegador não suporta GPS");
+      navigator.geolocation.getCurrentPosition(pos=>{
+        showNearest(pos.coords.latitude,pos.coords.longitude);
+      },(error)=>{
+        switch(error.code) {
+          case error.PERMISSION_DENIED:
+            alert("Você negou o acesso ao GPS 😕");
+            break;
+          case error.POSITION_UNAVAILABLE:
+            alert("Localização indisponível.");
+            break;
+          default:
+            alert("Erro ao obter localização.");
+        }
+      });
+    });
+
+    document.getElementById('btn-manual').addEventListener('click',()=>{
+      const val=document.getElementById('manual-coords').value.trim();
+      const [lat,lng]=val.split(',').map(Number);
+      if(isNaN(lat)||isNaN(lng)) return alert("Coordenadas inválidas!");
+      showNearest(lat,lng);
+    });
+
+    document.getElementById('btn-refresh').addEventListener('click',()=>{
+      drawMarkers();
+      map.setView([-23.55, -46.63], 13);
+      document.getElementById('resultInfo').innerText="Lista atualizada.";
+      document.getElementById('list').innerHTML = '';
+      // opcional: remover marcador do usuário ao atualizar
+      // if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
+    });
+
+  });
+  </script>
+</body>
+</html>
