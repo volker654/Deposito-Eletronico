@@ -10,7 +10,7 @@
 
   <style>
     body { font-family: system-ui, Arial, sans-serif; margin:0; color:#222; }
-    header { background: linear-gradient(90deg,#2b8a3e,#6ac67a); color:white; padding:18px; }
+    header { background: linear-gradient(90deg,#08418d,#0551df); color:white; padding:18px; }
     .container { padding:18px; max-width:1100px; margin:0 auto; }
     #map { height:400px; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); }
     .controls { display:flex; gap:12px; margin:12px 0; flex-wrap:wrap; }
@@ -23,6 +23,12 @@
     .distance { color:#2b8a3e; font-weight:700; margin-left:8px; }
     .small { font-size:0.9rem; color:#666; }
     .link { color:#2b8a3e; cursor:pointer; text-decoration:underline; }
+
+    @media (max-width: 600px) {
+      #map { height: 300px; }
+      .controls { flex-direction: column; }
+      input, button { width: 100%; }
+    }
   </style>
 </head>
 
@@ -30,24 +36,23 @@
   <header>
     <div class="container">
       <h1>Descarte Eletrônico — Encontre o ponto mais próximo</h1>
-      <p></p>
     </div>
   </header>
 
   <main class="container">
     <div class="controls">
-      <button id="btn-locate"> minha localização</button>
-      <button class="secondary" id="btn-refresh">🔄 Atualizar lista</button>
-      <div>
-        <input id="manual-coords" placeholder="ex: -23.5475,-46.63611">
-        <button id="btn-manual">Usar coords</button>
+      <button id="btn-locate">📍 Minha localização</button>
+      <button class="secondary" id="btn-refresh">🔄 Atualizar</button>
+      <div style="flex:1; display:flex; gap:8px;">
+        <input id="manual-address" placeholder="Digite um endereço, rua ou CEP">
+        <button id="btn-address">Buscar endereço</button>
       </div>
     </div>
 
     <div id="map"></div>
 
     <div class="info" id="resultInfo">
-      Clique em "Usar minha localização" para encontrar o ponto mais próximo.
+      Clique em "📍 Minha localização" ou digite um endereço para encontrar o ponto mais próximo.
     </div>
 
     <h3>Pontos de descarte</h3>
@@ -72,7 +77,6 @@
 
     const markersGroup = L.layerGroup().addTo(map);
 
-    // Ícone customizado para "você está aqui"
     const userIcon = L.divIcon({
       className: 'user-icon',
       html: `<div style="width:18px;height:18px;border-radius:50%;background:#2b8a3e;border:3px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3)"></div>`,
@@ -80,7 +84,7 @@
       iconAnchor: [12,12]
     });
 
-    let userMarker = null; // marcador único para a localização do usuário
+    let userMarker = null;
 
     function drawMarkers() {
       markersGroup.clearLayers();
@@ -103,25 +107,15 @@
 
     function updateList(sorted, userPos) {
       const listEl = document.getElementById('list');
-      // Primeiro item: usuário
       let html = `<div class="item">
-        <div>
-          <b>Você está aqui</b><br><span class="small">${userPos.lat.toFixed(5)}, ${userPos.lng.toFixed(5)}</span>
-        </div>
-        <div class="distance">0.00 km</div>
-      </div>`;
-      // Em seguida, os pontos ordenados (ignorando se for exatamente a mesma posição)
+        <div><b>Você está aqui</b><br><span class="small">${userPos.lat.toFixed(5)}, ${userPos.lng.toFixed(5)}</span></div>
+        <div class="distance">0.00 km</div></div>`;
       sorted.forEach(p=>{
         html += `<div class="item">
-          <div>
-            <b class="link" data-lat="${p.lat}" data-lng="${p.lng}">${p.name}</b><br><span class="small">${p.address}</span>
-          </div>
-          <div class="distance">${(p.dist/1000).toFixed(2)} km</div>
-        </div>`;
+          <div><b class="link" data-lat="${p.lat}" data-lng="${p.lng}">${p.name}</b><br><span class="small">${p.address}</span></div>
+          <div class="distance">${(p.dist/1000).toFixed(2)} km</div></div>`;
       });
       listEl.innerHTML = html;
-
-      // Adiciona click handler para centralizar quando o usuário clica no nome
       listEl.querySelectorAll('.link').forEach(el=>{
         el.addEventListener('click', (e)=>{
           const lat = Number(e.target.dataset.lat);
@@ -131,61 +125,62 @@
       });
     }
 
+    function highlightNearest(ponto) {
+      L.circleMarker([ponto.lat, ponto.lng], {
+        radius: 14,
+        color: '#2b8a3e',
+        weight: 3,
+        fillOpacity: 0.1
+      }).addTo(map);
+    }
+
     function showNearest(lat, lng) {
-      // calcula distâncias
       const sorted = dropOffs.map(p => ({...p, dist: haversine(lat,lng,p.lat,p.lng)}))
                              .sort((a,b)=>a.dist-b.dist);
 
-      // atualiza/coloca marcador do usuário (mantém apenas 1)
-      if (userMarker) {
-        userMarker.setLatLng([lat,lng]);
-      } else {
-        userMarker = L.marker([lat,lng], {icon: userIcon, zIndexOffset: 1000})
-                      .bindPopup("Você está aqui")
-                      .addTo(map);
-      }
+      if (userMarker) userMarker.setLatLng([lat,lng]);
+      else userMarker = L.marker([lat,lng], {icon: userIcon, zIndexOffset: 1000})
+                         .bindPopup("Você está aqui").addTo(map);
       userMarker.openPopup();
 
-      // redesenha os pontos de coleta (mantendo userMarker separado)
       drawMarkers();
-      sorted.forEach(p=>{
-        // para melhorar UX, já existe marcador criado por drawMarkers; manter popup com distância
-        // vamos adicionar um círculo leve ao redor do ponto mais próximo para destaque
-      });
+      highlightNearest(sorted[0]);
 
-      // ajustar bounds para mostrar usuário e ponto mais próximo
       const bounds = L.latLngBounds([[lat,lng],[sorted[0].lat,sorted[0].lng]]);
       map.fitBounds(bounds.pad(0.2));
 
       document.getElementById('resultInfo').innerHTML =
         `<b>Mais próximo:</b> ${sorted[0].name} — ${(sorted[0].dist/1000).toFixed(2)} km`;
-
       updateList(sorted, {lat, lng});
     }
 
+    async function geocodeAddress(address) {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}&limit=1`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.length === 0) throw new Error("Endereço não encontrado");
+      return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+    }
+
     document.getElementById('btn-locate').addEventListener('click',()=>{
+      document.getElementById('resultInfo').innerText = '🔍 Obtendo localização...';
       if (!navigator.geolocation) return alert("Seu navegador não suporta GPS");
       navigator.geolocation.getCurrentPosition(pos=>{
         showNearest(pos.coords.latitude,pos.coords.longitude);
-      },(error)=>{
-        switch(error.code) {
-          case error.PERMISSION_DENIED:
-            alert("Você negou o acesso ao GPS 😕");
-            break;
-          case error.POSITION_UNAVAILABLE:
-            alert("Localização indisponível.");
-            break;
-          default:
-            alert("Erro ao obter localização.");
-        }
-      });
+      },()=>alert("Erro ao obter localização."));
     });
 
-    document.getElementById('btn-manual').addEventListener('click',()=>{
-      const val=document.getElementById('manual-coords').value.trim();
-      const [lat,lng]=val.split(',').map(Number);
-      if(isNaN(lat)||isNaN(lng)) return alert("Coordenadas inválidas!");
-      showNearest(lat,lng);
+    document.getElementById('btn-address').addEventListener('click',async ()=>{
+      const address = document.getElementById('manual-address').value.trim();
+      if(!address) return alert("Digite um endereço, rua ou CEP.");
+      document.getElementById('resultInfo').innerText = '🔍 Buscando endereço...';
+      try {
+        const coords = await geocodeAddress(address);
+        showNearest(coords.lat, coords.lng);
+      } catch(err) {
+        alert(err.message);
+        document.getElementById('resultInfo').innerText = 'Endereço não encontrado.';
+      }
     });
 
     document.getElementById('btn-refresh').addEventListener('click',()=>{
@@ -193,8 +188,6 @@
       map.setView([-23.55, -46.63], 13);
       document.getElementById('resultInfo').innerText="Lista atualizada.";
       document.getElementById('list').innerHTML = '';
-      // opcional: remover marcador do usuário ao atualizar
-      // if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
     });
 
   });
